@@ -1,0 +1,12 @@
+This is an pack assistant for packing goods.
+
+Tech stack:
+- Tauri
+- Vue 3
+- Tailwind CSS
+- Vite
+
+Requirements:
+- Don't use any database, and any external API.
+- Make the layout totally by Tailwind CSS.
+- Package management: pnpm
