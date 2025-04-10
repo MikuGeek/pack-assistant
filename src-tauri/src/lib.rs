@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 // Constants for outer box parameters
 const CARDBOARD_THICKNESS_CM: f64 = 0.6;
@@ -31,6 +32,31 @@ pub struct Item {
 impl Item {
     pub fn volume(&self) -> f64 {
         self.length * self.width * self.height
+    }
+
+    // Create a rotated copy of the item (swapping dimensions)
+    pub fn with_rotation(&self, rotation: usize) -> Self {
+        // Six possible orientations: (l,w,h), (l,h,w), (w,l,h), (w,h,l), (h,l,w), (h,w,l)
+        let (length, width, height) = match rotation {
+            0 => (self.length, self.width, self.height), // Original
+            1 => (self.length, self.height, self.width), // Rotate around x-axis
+            2 => (self.width, self.length, self.height), // Rotate around y-axis
+            3 => (self.width, self.height, self.length), // Rotate around x and y
+            4 => (self.height, self.length, self.width), // Rotate around x and z
+            5 => (self.height, self.width, self.length), // Rotate around z-axis
+            _ => (self.length, self.width, self.height), // Default to original
+        };
+
+        Item {
+            id: self.id.clone(),
+            destination: self.destination.clone(),
+            length,
+            width,
+            height,
+            weight: self.weight,
+            position: None,
+            box_index: None,
+        }
     }
 }
 
@@ -66,14 +92,16 @@ impl PackedBox {
         let new_length = (position.0 + item.length).max(self.length);
         let new_width = (position.1 + item.width).max(self.width);
         let new_height = (position.2 + item.height).max(self.height);
-        // Store item weight before pushing to items vector
-        let item_weight = item.weight;
 
         // Update item with position and box information
         item.position = Some(position);
         item.box_index = Some(self.items.len());
 
+        // Store item weight before pushing to items vector
+        let item_weight = item.weight;
         self.items.push(item);
+
+        // Update box dimensions and weight
         self.length = new_length;
         self.width = new_width;
         self.height = new_height;
@@ -101,6 +129,24 @@ impl PackedBox {
         let items_weight: f64 = self.items.iter().map(|item| item.weight).sum();
         self.weight = items_weight + box_weight;
     }
+
+    // Calculate the smallest face area
+    pub fn smallest_face_area(&self) -> f64 {
+        let face1 = self.length * self.width;
+        let face2 = self.length * self.height;
+        let face3 = self.width * self.height;
+
+        face1.min(face2).min(face3)
+    }
+
+    // Calculate total surface area
+    pub fn surface_area(&self) -> f64 {
+        2.0 * (
+            self.length * self.width +
+            self.length * self.height +
+            self.width * self.height
+        )
+    }
 }
 
 // Packing solution
@@ -114,12 +160,7 @@ pub struct PackingSolution {
 // Get destination constraints
 fn get_destination_constraints(destination: &str) -> DestinationConstraints {
     match destination {
-        "Australia" => DestinationConstraints {
-            max_box_dimension: 63.0,
-            max_box_weight: 22.0,
-            alternative_dimensions: None,
-        },
-        "USA" => DestinationConstraints {
+        "Australia" | "USA" => DestinationConstraints {
             max_box_dimension: 63.0,
             max_box_weight: 22.0,
             alternative_dimensions: None,
@@ -151,16 +192,16 @@ fn get_destination_constraints(destination: &str) -> DestinationConstraints {
 fn fits_constraints(item: &Item, constraints: &DestinationConstraints) -> bool {
     if let Some((max_length, max_width, max_height)) = constraints.alternative_dimensions {
         // Special case for destinations with specific dimension constraints (like Japan)
-        return item.length <= max_length &&
-               item.width <= max_width &&
-               item.height <= max_height &&
-               item.weight <= constraints.max_box_weight;
+        item.length <= max_length &&
+        item.width <= max_width &&
+        item.height <= max_height &&
+        item.weight <= constraints.max_box_weight
     } else {
         // Standard case
-        return item.length <= constraints.max_box_dimension &&
-               item.width <= constraints.max_box_dimension &&
-               item.height <= constraints.max_box_dimension &&
-               item.weight <= constraints.max_box_weight;
+        item.length <= constraints.max_box_dimension &&
+        item.width <= constraints.max_box_dimension &&
+        item.height <= constraints.max_box_dimension &&
+        item.weight <= constraints.max_box_weight
     }
 }
 
@@ -178,12 +219,10 @@ fn can_place_item(box_data: &PackedBox, item: &Item, position: (f64, f64, f64)) 
            z + item.height > max_height {
             return false;
         }
-    } else {
-        if x + item.length > constraints.max_box_dimension ||
-           y + item.width > constraints.max_box_dimension ||
-           z + item.height > constraints.max_box_dimension {
-            return false;
-        }
+    } else if x + item.length > constraints.max_box_dimension ||
+              y + item.width > constraints.max_box_dimension ||
+              z + item.height > constraints.max_box_dimension {
+        return false;
     }
 
     // Check for collisions with existing items
@@ -202,12 +241,7 @@ fn can_place_item(box_data: &PackedBox, item: &Item, position: (f64, f64, f64)) 
     }
 
     // Check if total weight would exceed maximum
-    let new_weight = box_data.weight + item.weight;
-    if new_weight > constraints.max_box_weight {
-        return false;
-    }
-
-    true
+    box_data.weight + item.weight <= constraints.max_box_weight
 }
 
 // Find the best position to place an item in a box
@@ -218,7 +252,7 @@ fn find_best_position(box_data: &PackedBox, item: &Item) -> Option<(f64, f64, f6
     }
 
     // Get all extreme points (candidates for placement)
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(box_data.items.len() * 3 + 1);
 
     // Add (0,0,0) as a candidate
     candidates.push((0.0, 0.0, 0.0));
@@ -245,19 +279,48 @@ fn find_best_position(box_data: &PackedBox, item: &Item) -> Option<(f64, f64, f6
     });
 
     // Try each candidate position
-    for pos in candidates {
-        if can_place_item(box_data, item, pos) {
-            return Some(pos);
+    candidates.into_iter().find(|&pos| can_place_item(box_data, item, pos))
+}
+
+// Find the best position and rotation to place an item in a box
+fn find_best_position_with_rotation(box_data: &PackedBox, item: &Item) -> Option<((f64, f64, f64), Item)> {
+    let mut best_placement: Option<((f64, f64, f64), Item)> = None;
+    let mut smallest_resulting_surface_area = f64::MAX;
+
+    // Try all six possible rotations of the item
+    for rotation in 0..6 {
+        let rotated_item = item.with_rotation(rotation);
+
+        // Skip if this rotation violates constraints
+        let constraints = get_destination_constraints(&box_data.destination);
+        if !fits_constraints(&rotated_item, &constraints) {
+            continue;
+        }
+
+        // Find the best position for this rotation
+        if let Some(position) = find_best_position(box_data, &rotated_item) {
+            // Create a temporary box copy to test this placement
+            let mut test_box = box_data.clone();
+            test_box.add_item(rotated_item.clone(), position);
+
+            // Calculate the resulting surface area
+            let surface_area = test_box.surface_area();
+
+            // Update best placement if this results in smaller surface area
+            if surface_area < smallest_resulting_surface_area {
+                smallest_resulting_surface_area = surface_area;
+                best_placement = Some((position, rotated_item));
+            }
         }
     }
 
-    None
+    best_placement
 }
 
 // Main packing algorithm implementation
 fn pack_items_impl(items: Vec<Item>) -> PackingSolution {
     // Group items by destination
-    let mut items_by_destination: std::collections::HashMap<String, Vec<Item>> = std::collections::HashMap::new();
+    let mut items_by_destination: HashMap<String, Vec<Item>> = HashMap::new();
 
     for item in items {
         items_by_destination
@@ -286,8 +349,8 @@ fn pack_items_impl(items: Vec<Item>) -> PackingSolution {
         for item in destination_items {
             let constraints = get_destination_constraints(&destination);
 
-            // Check if the item itself is too large for constraints
-            if !fits_constraints(&item, &constraints) {
+            // Check if the item itself is too large for constraints (in any orientation)
+            if !(0..6).any(|rot| fits_constraints(&item.with_rotation(rot), &constraints)) {
                 unpacked.push(item);
                 continue;
             }
@@ -296,8 +359,8 @@ fn pack_items_impl(items: Vec<Item>) -> PackingSolution {
 
             // Try to place in existing boxes
             for box_data in &mut boxes_for_destination {
-                if let Some(position) = find_best_position(box_data, &item) {
-                    box_data.add_item(item.clone(), position);
+                if let Some((position, rotated_item)) = find_best_position_with_rotation(box_data, &item) {
+                    box_data.add_item(rotated_item, position);
                     placed = true;
                     break;
                 }
@@ -306,7 +369,16 @@ fn pack_items_impl(items: Vec<Item>) -> PackingSolution {
             // If not placed, create a new box
             if !placed {
                 let mut new_box = PackedBox::new(&destination);
-                new_box.add_item(item.clone(), (0.0, 0.0, 0.0));
+
+                // For a new box, try all rotations and pick the one that fits constraints
+                let (position, rotated_item) = (0..6)
+                    .map(|rot| (rot, item.with_rotation(rot)))
+                    .filter(|(_, rotated)| fits_constraints(rotated, &constraints))
+                    .next()
+                    .map(|(_, rotated)| ((0.0, 0.0, 0.0), rotated))
+                    .unwrap_or(((0.0, 0.0, 0.0), item.clone()));
+
+                new_box.add_item(rotated_item, position);
                 boxes_for_destination.push(new_box);
             }
         }
@@ -317,14 +389,9 @@ fn pack_items_impl(items: Vec<Item>) -> PackingSolution {
     }
 
     // Calculate total volume
-    solution.total_volume = solution.boxes.iter().map(|b| b.volume()).sum();
+    solution.total_volume = solution.boxes.iter().map(PackedBox::volume).sum();
 
     solution
-}
-
-// Calculate the cost of a packing solution (assuming cost is proportional to volume)
-fn calculate_cost_impl(solution: &PackingSolution) -> f64 {
-    solution.total_volume
 }
 
 // Define commands in a separate module to avoid name conflicts
@@ -335,21 +402,15 @@ pub mod commands {
     pub fn pack_items(items: Vec<Item>) -> PackingSolution {
         pack_items_impl(items)
     }
-
-    #[tauri::command]
-    pub fn calculate_cost(solution: PackingSolution) -> f64 {
-        calculate_cost_impl(&solution)
-    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    .plugin(tauri_plugin_opener::init())
-    .invoke_handler(tauri::generate_handler![
-        commands::pack_items,
-        commands::calculate_cost
-    ])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::pack_items
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
