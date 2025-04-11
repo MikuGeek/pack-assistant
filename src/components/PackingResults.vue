@@ -133,108 +133,6 @@ function getConstraints(destination: string) {
   return constraints[destination] || { dimensions: "未知", weight: "未知", description: "无约束信息。" };
 }
 
-// Function to download results as CSV
-function downloadCSV() {
-  if (!props.solution) return;
-
-  let csvContent = "data:text/csv;charset=utf-8,";
-  // Add BOM for UTF-8 Excel compatibility
-  csvContent += "\uFEFF";
-
-  const headers = [
-    "类型", // Packed/Unpacked
-    "箱号",
-    "目的地",
-    "箱子尺寸(内 L×W×H cm)",
-    "箱子尺寸(外 L×W×H cm)",
-    "箱子重量(kg)",
-    "装箱率(%)",
-    "物品ID",
-    "物品名称",
-    "物品尺寸(L×W×H cm)",
-    "物品重量(kg)",
-    "物品位置(X,Y,Z)",
-    "未装箱原因",
-  ];
-  csvContent += headers.join(",") + "\r\n";
-
-  // Add packed items
-  props.solution.boxes.forEach((box, boxIndex) => {
-    const outerLength = (box.length + 1.2).toFixed(1);
-    const outerWidth = (box.width + 1.2).toFixed(1);
-    const outerHeight = (box.height + 1.2).toFixed(1);
-    const utilization = calculateUtilization(box).toFixed(0);
-
-    if (box.items.length === 0) {
-       // Add a row for empty boxes if necessary, adjust columns accordingly
-       const row = [
-        "已装箱",
-        `#${boxIndex + 1}`,
-        box.destination,
-        `${box.length.toFixed(1)}×${box.width.toFixed(1)}×${box.height.toFixed(1)}`,
-        `${outerLength}×${outerWidth}×${outerHeight}`,
-        box.weight.toFixed(2),
-        utilization,
-        "N/A", // Item ID
-        "空箱", // Item Name
-        "N/A", // Item Dimensions
-        "N/A", // Item Weight
-        "N/A", // Item Position
-        "N/A", // Unpacked Reason
-      ].map(value => `"${value.toString().replace(/"/g, '""')}"`).join(","); // Ensure proper CSV quoting
-      csvContent += row + "\r\n";
-    } else {
-      box.items.forEach(item => {
-        const position = item.position ? `(${item.position[0].toFixed(1)}, ${item.position[1].toFixed(1)}, ${item.position[2].toFixed(1)})` : "N/A";
-        const row = [
-          "已装箱",
-          `#${boxIndex + 1}`,
-          box.destination,
-          `${box.length.toFixed(1)}×${box.width.toFixed(1)}×${box.height.toFixed(1)}`,
-          `${outerLength}×${outerWidth}×${outerHeight}`,
-          box.weight.toFixed(2),
-          utilization,
-          item.id,
-          getItemName(item.id),
-          `${item.length}×${item.width}×${item.height}`,
-          item.weight.toString(),
-          position,
-          "N/A", // Unpacked Reason
-        ].map(value => `"${value.toString().replace(/"/g, '""')}"`).join(","); // Ensure proper CSV quoting
-        csvContent += row + "\r\n";
-      });
-    }
-  });
-
-  // Add unpacked items
-  props.solution.unpacked_items.forEach(item => {
-    const row = [
-      "未装箱",
-      "N/A", // Box Number
-      item.destination,
-      "N/A", // Box Dimensions (Inner)
-      "N/A", // Box Dimensions (Outer)
-      "N/A", // Box Weight
-      "N/A", // Utilization
-      item.id,
-      getItemName(item.id),
-      `${item.length}×${item.width}×${item.height}`,
-      item.weight.toString(),
-      "N/A", // Item Position
-      getUnpackedReason(item),
-    ].map(value => `"${value.toString().replace(/"/g, '""')}"`).join(","); // Ensure proper CSV quoting
-    csvContent += row + "\r\n";
-  });
-
-  // Create and trigger download link
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", "packing_results.csv");
-  document.body.appendChild(link); // Required for Firefox
-  link.click();
-  document.body.removeChild(link);
-}
 </script>
 
 <template>
@@ -357,19 +255,6 @@ function downloadCSV() {
           <p>• 箱子重量包含纸板（厚度：0.6cm，重量：0.54 kg/m²）</p>
           <p>• 物品装箱时会在遵守目的地限制的前提下最小化空间浪费</p>
         </div>
-      </div>
-
-      <!-- Download CSV Button MOVED HERE -->
-      <div class="mt-5 flex justify-center">
-        <button
-          @click="downloadCSV"
-          class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-150"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          下载 CSV
-        </button>
       </div>
     </div>
 
