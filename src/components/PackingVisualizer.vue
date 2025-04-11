@@ -24,6 +24,7 @@ interface PackedBox {
   destination: string;
 }
 
+// Define proper props for PackingVisualizer component
 const props = defineProps<{
   box: PackedBox | null;
   boxIndex: number;
